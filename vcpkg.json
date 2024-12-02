@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "fmt",
+    "ftxui",
+    "libflac",
+    "mp3lame",
+    "simdjson"
+  ]
+}
