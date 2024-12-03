@@ -1,10 +1,11 @@
+block()
 set(root "${CMAKE_CURRENT_LIST_DIR}/..")
 
 set(INTERFACE_FILES
 )
 
 set(SOURCE_FILES
-    ${root}/source/main.cpp
+    ${root}/implementation/main.cpp
 )
 
 set(BUILD_FILES
@@ -27,4 +28,7 @@ target_link_libraries(MusicConverter PRIVATE
   ftxui::dom
   ftxui::screen
   ftxui::component
+  engine
 )
+
+endblock()

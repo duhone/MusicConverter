@@ -9,16 +9,14 @@ int main(int, char**) {
 	using namespace ftxui;
 
 	// Define the document
-	Element document =
-		hbox({
-		  text("left") | border,
-		  text("middle") | border | flex,
-		  text("right") | border,
-			});
+	Element document = hbox({
+	    text("left") | border,
+	    text("middle") | border | flex,
+	    text("right") | border,
+	});
 
-	auto screen = Screen::Create(
-		Dimension::Full(),       // Width
-		Dimension::Fit(document) // Height
+	auto screen = Screen::Create(Dimension::Full(),          // Width
+	                             Dimension::Fit(document)    // Height
 	);
 	Render(screen, document);
 	screen.Print();

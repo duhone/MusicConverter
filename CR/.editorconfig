@@ -1,0 +1,3 @@
+[*.{h,hpp,ixx,c,cpp,cxx}]
+indent_style = tab
+indent_size = 2

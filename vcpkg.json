@@ -2,8 +2,10 @@
   "dependencies": [
     "fmt",
     "ftxui",
+    "glm",
     "libflac",
     "mp3lame",
-    "simdjson"
+    "simdjson",
+    "spdlog"
   ]
 }

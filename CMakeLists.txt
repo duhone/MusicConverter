@@ -1,9 +1,27 @@
-cmake_minimum_required (VERSION 3.31)
+cmake_minimum_required (VERSION 3.31 FATAL_ERROR)
+
+set(root "${CMAKE_CURRENT_LIST_DIR}")
+
+# Set experimental flag to enable `import std` support from CMake.
+# This must be enabled before C++ language support.
+set(CMAKE_EXPERIMENTAL_IMPORT_STD
+  # This specific value changes as experimental support evolves. See
+  # `Help/dev/experimental.rst` in the CMake source corresponding to
+  # your CMake build for the exact value to use.
+  "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-project(MusicConverter)
+project(MusicConverter LANGUAGES CXX)
 
-include (${CMAKE_CURRENT_LIST_DIR}/common.cmake)
-include (${CMAKE_CURRENT_LIST_DIR}/3rdParty/build/build.cmake)
-include (${CMAKE_CURRENT_LIST_DIR}/CR/Application/build/build.cmake)
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED YES)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED YES)
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+#set(CMAKE_CXX_MODULE_STD ON) //doesnt work with VS, but also doesn't seem to be needed
+
+include (${root}/common.cmake)
+include (${root}/3rdParty/build/build.cmake)
+include (${root}/CR/Engine/build/build.cmake)
+include (${root}/CR/Application/build/build.cmake)

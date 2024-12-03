@@ -13,10 +13,15 @@ set(generated_root "${CMAKE_BINARY_DIR}/generated/generated")
 
 # set(CMAKE_CXX_CLANG_TIDY clang-tidy -checks=cppcoreguidelines-*)
 
-function(addCommon target)		
+function(addCommon target)	
 	# using rtti for service locator
 	#target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/GR->)
 	
+	# secure versions don't seem available in std module
+	target_compile_definitions(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
+	
+	target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)	
+
 	target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX>)
 	target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/fp:fast>)
 	target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/fp:except->)
@@ -67,7 +72,7 @@ endfunction()
 
 function(settingsCR target)	
 	addCommon(${target})
-	
+
 	source_group(TREE ${root} FILES ${INTERFACE_FILES})
 	source_group(TREE ${root} FILES ${SOURCE_FILES})
 	source_group(TREE ${root} FILES ${BUILD_FILES})
