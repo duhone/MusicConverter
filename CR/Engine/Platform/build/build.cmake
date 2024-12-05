@@ -5,27 +5,26 @@ set(root "${CMAKE_CURRENT_LIST_DIR}/..")
 ###############################################
 #library
 ###############################################
-set(INTERFACE_FILES
+set(CR_INTERFACE_HEADERS
+    ${root}/interface/platform/windows/CRWindows.h 
+)
+
+set(CR_INTERFACE_MODULES
     ${root}/interface/MemoryMappedFile.ixx
     ${root}/interface/PathUtils.ixx
     ${root}/interface/Platform.ixx
-    ${root}/interface/platform/windows/CRWindows.h
 )
 
-set(SOURCE_FILES
+set(CR_IMPLEMENTATION
     ${root}/implementation/windows/MemoryMappedFile.cxx
     ${root}/implementation/windows/PathUtils.cxx
 )
 
-set(BUILD_FILES
+set(CR_BUILD_FILES
     ${root}/build/build.cmake
 )
 
-add_library(platform 
-  ${INTERFACE_FILES} 
-  ${SOURCE_FILES} 
-  ${BUILD_FILES}
-)
+add_library(platform)
 
 settingsCR(platform)
 

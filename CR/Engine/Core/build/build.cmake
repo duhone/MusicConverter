@@ -5,9 +5,12 @@ set(root "${CMAKE_CURRENT_LIST_DIR}/..")
 ###############################################
 #library
 ###############################################
-set(INTERFACE_FILES
+set(CR_INTERFACE_HEADERS
     ${root}/interface/core/Log.hpp
     ${root}/interface/core/Reflection.hpp
+)
+
+set(CR_INTERFACE_MODULES
     ${root}/interface/Algorithm.ixx
     ${root}/interface/BinaryStream.ixx
     ${root}/interface/BitSet.ixx
@@ -33,21 +36,17 @@ set(INTERFACE_FILES
     ${root}/interface/TypeTraits.ixx
 )
 
-set(SOURCE_FILES
+set(CR_IMPLEMENTATION
     ${root}/implementation/Log.cxx
     ${root}/implementation/Random.cxx
     ${root}/implementation/Timer.cxx
 )
 
-set(BUILD_FILES
+set(CR_BUILD_FILES
     ${root}/build/build.cmake
 )
 
-add_library(core 
-  ${INTERFACE_FILES} 
-  ${SOURCE_FILES} 
-  ${BUILD_FILES}
-)
+add_library(core)
 
 settingsCR(core)
 

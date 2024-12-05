@@ -3,9 +3,10 @@
     "fmt",
     "ftxui",
     "glm",
-    "libflac",
+    "libsamplerate",
     "mp3lame",
     "simdjson",
-    "spdlog"
+    "spdlog",
+    "drlibs"
   ]
 }

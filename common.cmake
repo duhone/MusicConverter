@@ -1,6 +1,10 @@
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED YES)
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+#set(CMAKE_CXX_MODULE_STD ON) //doesnt work with VS, but also doesn't seem to be needed
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "Do not build in-source.")
@@ -60,9 +64,10 @@ endfunction()
 function(settings3rdParty target)	
 	addCommon(${target})
 	
-	source_group("Interface" FILES ${INTERFACE_FILES})
-	source_group("Source" FILES ${SOURCE_FILES})
-	source_group("Build" FILES ${BUILD_FILES})
+	source_group("Interface" FILES ${CR_INTERFACE_HEADERS})
+	source_group("Interface" FILES ${CR_INTERFACE_MODULES})
+	source_group("Implementation" FILES ${CR_IMPLEMENTATION})
+	source_group("Build" FILES ${CR_BUILD_FILES})
 	
 	target_compile_options(${target} PRIVATE /W0)
 	target_compile_options(${target} PRIVATE /WX-)
@@ -73,9 +78,14 @@ endfunction()
 function(settingsCR target)	
 	addCommon(${target})
 
-	source_group(TREE ${root} FILES ${INTERFACE_FILES})
-	source_group(TREE ${root} FILES ${SOURCE_FILES})
-	source_group(TREE ${root} FILES ${BUILD_FILES})
+	target_sources(${target} PRIVATE ${CR_IMPLEMENTATION})
+	target_sources(${target} PUBLIC FILE_SET HEADERS FILES ${CR_INTERFACE_HEADERS})
+	target_sources(${target} PUBLIC FILE_SET CXX_MODULES FILES ${CR_INTERFACE_MODULES})
+
+	source_group(TREE ${root} FILES ${CR_INTERFACE_HEADERS})
+	source_group(TREE ${root} FILES ${CR_INTERFACE_MODULES})
+	source_group(TREE ${root} FILES ${CR_IMPLEMENTATION})
+	source_group(TREE ${root} FILES ${CR_BUILD_FILES})
 		
 	target_compile_options(${target} PRIVATE /W4)
 	target_compile_options(${target} PRIVATE /WX)
