@@ -1,7 +1,14 @@
 #include <fmt/format.h>
-#include <ftxui/dom/elements.hpp>
-#include <ftxui/screen/screen.hpp>
 #include <simdjson.h>
+
+#define GLAD_GL_IMPLEMENTATION
+#include <glad/glad.h>
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 
 import CR.Engine;
 
@@ -38,24 +45,52 @@ void SaveConfig() {
 }
 
 int main(int, char**) {
-	using namespace ftxui;
-
 	fs::current_path(cep::GetCurrentProcessPath());
 
 	LoadConfig();
 
-	// Define the document
-	Element document = hbox({
-	    text("left") | border,
-	    text("middle") | border | flex,
-	    text("right") | border,
-	});
+	if(!glfwInit()) { return EXIT_FAILURE; }
 
-	auto screen = Screen::Create(Dimension::Full(),          // Width
-	                             Dimension::Fit(document)    // Height
-	);
-	Render(screen, document);
-	screen.Print();
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	GLFWwindow* window = glfwCreateWindow(800, 600, "Music Converter", nullptr, nullptr);
+	if(!window) { return EXIT_FAILURE; }
+	glfwMakeContextCurrent(window);
+	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+
+	glfwSwapInterval(1);
+
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init();
+
+	while(!glfwWindowShouldClose(window)) {
+		glfwPollEvents();
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+		ImGui::ShowDemoWindow();
+
+		int width, height;
+		glfwGetFramebufferSize(window, &width, &height);
+		glViewport(0, 0, width, height);
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+		glfwSwapBuffers(window);
+	}
+
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
+
+	glfwDestroyWindow(window);
+	glfwTerminate();
 
 	SaveConfig();
 

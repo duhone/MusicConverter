@@ -1,12 +1,20 @@
 {
   "dependencies": [
     "fmt",
-    "ftxui",
+    "glfw3",
     "glm",
     "libsamplerate",
     "mp3lame",
     "simdjson",
     "spdlog",
-    "drlibs"
+    "drlibs",
+    {
+        "name": "glad",
+        "features": [ "extensions", "gl-api-46" ]
+    },
+    {
+        "name": "imgui",
+        "features": [ "glfw-binding", "opengl3-binding" ]
+    }
   ]
 }

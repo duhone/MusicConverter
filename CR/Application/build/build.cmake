@@ -23,9 +23,9 @@ target_link_libraries(MusicConverter PRIVATE
 	mp3lame::mp3lame
   fmt::fmt
   simdjson::simdjson
-  ftxui::dom
-  ftxui::screen
-  ftxui::component
+  glfw
+  glad::glad
+  imgui::imgui
   SampleRate::samplerate
   engine
 )
