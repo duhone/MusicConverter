@@ -20,6 +20,8 @@ namespace cep = CR::Engine::Platform;
 
 namespace fs = std::filesystem;
 
+using namespace std::literals;
+
 enum class AppState { Idle, Converting, Cancelling };
 
 const fs::path c_configPath{"config.json"};
@@ -33,18 +35,47 @@ std::string destPathString;
 
 std::mutex dataMutex;
 float convertProgress{};
-std::deque<std::string> Log;
-std::vector<std::move_only_function<void()>> workQueue;
+std::string Operation;
+std::mutex OperationMutex;
+std::mutex ErrorLogMutex;
+std::deque<std::string> ErrorLog;
+std::deque<std::move_only_function<void()>> workQueue;
 
 GLFWwindow* window{};
 
-std::string GetLog() {
+std::jthread workerThread;
+
+template<typename... T>
+void AddError(fmt::format_string<T...> formatString, T&&... args) {
+	std::string logLine = fmt::format(formatString, args...);
+	std::scoped_lock lock(ErrorLogMutex);
+	ErrorLog.push_back(logLine);
+}
+
+template<typename... T>
+void SetOperation(fmt::format_string<T...> formatString, T&&... args) {
+	std::scoped_lock lock(OperationMutex);
+	Operation = fmt::format(formatString, args...);
+}
+
+std::string GetErrorLog() {
+	std::scoped_lock lock(ErrorLogMutex);
 	std::string result;
-	for(const auto& line : Log) {
+	for(const auto& line : ErrorLog) {
 		if(!result.empty()) { result += '\n'; }
 		result += line;
 	}
 	return result;
+}
+
+std::string GetOperation() {
+	std::scoped_lock lock(OperationMutex);
+	return Operation;
+}
+
+void ClearErrorLog() {
+	std::scoped_lock loc(ErrorLogMutex);
+	ErrorLog.clear();
 }
 
 void LoadConfig() {
@@ -68,9 +99,33 @@ void SaveConfig() {
 	outputFile << outputString;
 }
 
-void StartConversion() {}
+void StartConversion() {
+	ClearErrorLog();
+}
 
-void CancelConversion() {}
+void CancelConversion() {
+	std::scoped_lock loc(dataMutex);
+	workQueue.clear();
+}
+
+void WorkerMain(std::stop_token stoken) {
+	std::move_only_function<void()> workItem;
+	while(!stoken.stop_requested()) {
+		{
+			std::scoped_lock loc(dataMutex);
+			if(!workQueue.empty()) {
+				workItem = std::move(workQueue.front());
+				workQueue.pop_front();
+			}
+		}
+		if(workItem) {
+			workItem();
+			workItem = nullptr;
+		} else {
+			std::this_thread::sleep_for(50ms);
+		}
+	}
+}
 
 void DrawUI() {
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
@@ -104,15 +159,21 @@ void DrawUI() {
 
 		{
 			if(appState == AppState::Idle) {
+				SetOperation("Idle");
 				if(ImGui::Button("Convert Files", {0, 0})) {
 					appState = AppState::Converting;
+					SetOperation("Starting Conversion");
 					StartConversion();
 				}
 
 			} else if(appState == AppState::Converting) {
 				if(ImGui::Button("Cancel Conversion", {0, 0})) {
 					appState = AppState::Cancelling;
+					SetOperation("Canceling Conversion");
 					CancelConversion();
+				} else {
+					std::scoped_lock loc(dataMutex);
+					if(workQueue.empty()) { appState = AppState::Idle; }
 				}
 			} else if(appState == AppState::Cancelling) {
 				ImGui::BeginDisabled();
@@ -128,9 +189,12 @@ void DrawUI() {
 			ImGui::ProgressBar(convertProgress, {1260, 0}, nullptr);
 
 			ImGui::AlignTextToFramePadding();
-			std::string log = GetLog();
-			ImGui::InputTextMultiline("##log_text", &log, ImVec2(1260, 540),
-			                          ImGuiInputTextFlags_ReadOnly);
+			std::string operation = GetOperation();
+			ImGui::InputText("Current Operation", &operation, ImGuiInputTextFlags_ReadOnly);
+			std::string log = GetErrorLog();
+			ImGui::InputTextMultiline("##log_text", &log, ImVec2(1260, 510),
+			                          ImGuiInputTextFlags_ReadOnly |
+			                              ImGuiInputTextFlags_NoHorizontalScroll);
 		}
 
 		ImGui::End();
@@ -166,6 +230,10 @@ int main(int, char**) {
 	sourcePathString = sourcePath.string();
 	destPathString   = destPath.string();
 
+	workerThread = std::jthread(WorkerMain);
+
+	SetOperation("Idle");
+
 	while(!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 		ImGui_ImplOpenGL3_NewFrame();
@@ -184,6 +252,10 @@ int main(int, char**) {
 
 		glfwSwapBuffers(window);
 	}
+
+	CancelConversion();
+	workerThread.request_stop();
+	workerThread.join();
 
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
