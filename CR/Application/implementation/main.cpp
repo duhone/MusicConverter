@@ -47,7 +47,7 @@ std::jthread workerThread;
 
 template<typename... T>
 void AddError(fmt::format_string<T...> formatString, T&&... args) {
-	std::string logLine = fmt::format(formatString, args...);
+	std::string logLine = fmt::format(formatString, std::forward<T>(args)...);
 	std::scoped_lock lock(ErrorLogMutex);
 	ErrorLog.push_back(logLine);
 }
@@ -55,7 +55,7 @@ void AddError(fmt::format_string<T...> formatString, T&&... args) {
 template<typename... T>
 void SetOperation(fmt::format_string<T...> formatString, T&&... args) {
 	std::scoped_lock lock(OperationMutex);
-	Operation = fmt::format(formatString, args...);
+	Operation = fmt::format(formatString, std::forward<T>(args)...);
 }
 
 std::string GetErrorLog() {
@@ -89,11 +89,23 @@ void LoadConfig() {
 	}
 }
 
+std::string EscapePathForJson(const fs::path& path) {
+	std::string result;
+	for(const auto achar : path.string()) {
+		if(achar == '\\') {
+			result += "\\\\";
+		} else {
+			result += achar;
+		}
+	}
+	return result;
+}
+
 void SaveConfig() {
 	constexpr auto c_outputFormat = R"({{"source_path":"{}", "dest_path":"{}"}})";
 
-	auto outputString =
-	    fmt::format(fmt::runtime(c_outputFormat), sourcePath.string(), destPath.string());
+	auto outputString = fmt::format(fmt::runtime(c_outputFormat), EscapePathForJson(sourcePath),
+	                                EscapePathForJson(destPath));
 
 	std::ofstream outputFile(c_configPath);
 	outputFile << outputString;
@@ -101,6 +113,16 @@ void SaveConfig() {
 
 void StartConversion() {
 	ClearErrorLog();
+	sourcePath = sourcePathString;
+	destPath   = destPathString;
+	if(!fs::exists(sourcePath)) {
+		AddError("Source Path {} doesn't exist", sourcePath.string());
+		return;
+	}
+	if(!fs::exists(destPath)) {
+		AddError("Destination Path {} doesn't exist", destPath.string());
+		return;
+	}
 }
 
 void CancelConversion() {
