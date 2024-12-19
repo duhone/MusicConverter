@@ -123,6 +123,41 @@ void StartConversion() {
 		AddError("Destination Path {} doesn't exist", destPath.string());
 		return;
 	}
+
+	// First lets delete any directories in dest that aren't in source
+	std::vector<fs::path> pathsToDelete;
+	for(const auto& entry : fs::recursive_directory_iterator(destPath)) {
+		if(entry.is_directory()) {
+			auto relPath     = fs::relative(entry.path(), destPath);
+			auto pathToCheck = sourcePath / relPath;
+			if(!fs::exists(pathToCheck)) { pathsToDelete.push_back(entry.path()); }
+		}
+	}
+	// Now add any missing folders
+	std::vector<fs::path> pathsToAdd;
+	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
+		if(entry.is_directory()) {
+			auto relPath     = fs::relative(entry.path(), sourcePath);
+			auto pathToCheck = destPath / relPath;
+			if(!fs::exists(pathToCheck)) { pathsToAdd.push_back(pathToCheck); }
+		}
+	}
+
+	// and push a work item to make these changes.
+	{
+		std::scoped_lock loc(dataMutex);
+		workQueue.emplace_back(
+		    [pathsToDelete = std::move(pathsToDelete), pathsToAdd = std::move(pathsToAdd)]() {
+			    for(const auto& path : pathsToDelete) {
+				    // may have already been deleted if its a sub folder
+				    if(fs::exists(path)) { fs::remove_all(path); }
+			    }
+			    for(const auto& path : pathsToAdd) {
+				    // may have already been added if a sub folder was already added
+				    if(!fs::exists(path)) { fs::create_directories(path); }
+			    }
+		    });
+	}
 }
 
 void CancelConversion() {
