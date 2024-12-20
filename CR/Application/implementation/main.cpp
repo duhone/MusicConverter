@@ -24,6 +24,11 @@ using namespace std::literals;
 
 enum class AppState { Idle, Converting, Cancelling };
 
+struct ConversionJob {
+	fs::path source;
+	fs::path dest;
+};
+
 const fs::path c_configPath{"config.json"};
 
 AppState appState{AppState::Idle};
@@ -34,6 +39,8 @@ std::string sourcePathString;
 std::string destPathString;
 
 std::mutex dataMutex;
+int32_t numJobs{};
+int32_t completedJobs{};
 float convertProgress{};
 std::string Operation;
 std::mutex OperationMutex;
@@ -111,6 +118,13 @@ void SaveConfig() {
 	outputFile << outputString;
 }
 
+void ConvertFile([[maybe_unused]] const ConversionJob& job) {}
+
+void FinishedJob() {
+	++completedJobs;
+	convertProgress = (float)completedJobs / numJobs;
+}
+
 void StartConversion() {
 	ClearErrorLog();
 	sourcePath = sourcePathString;
@@ -133,6 +147,7 @@ void StartConversion() {
 			if(!fs::exists(pathToCheck)) { pathsToDelete.push_back(entry.path()); }
 		}
 	}
+
 	// Now add any missing folders
 	std::vector<fs::path> pathsToAdd;
 	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
@@ -143,20 +158,53 @@ void StartConversion() {
 		}
 	}
 
+	// now need to add conversion work. this work must happen after the folder structure is correct
+	std::vector<ConversionJob> pathsToConvert;
+	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
+		if(!entry.is_directory()) {
+			auto relPath         = fs::relative(entry.path(), sourcePath);
+			auto pathToCheck     = destPath / relPath;
+			bool needsConversion = false;
+			if(!fs::exists(pathToCheck)) {
+				needsConversion = true;
+			} else if(fs::last_write_time(entry.path()) > fs::last_write_time(pathToCheck)) {
+				needsConversion = true;
+			}
+			if(needsConversion) { pathsToConvert.emplace_back(entry.path(), pathToCheck); }
+		}
+	}
+
+	// adding and removing folders are 1 job each.
+	numJobs         = (int32_t)pathsToConvert.size() + 2;
+	completedJobs   = 0;
+	convertProgress = 0.0f;
+
 	// and push a work item to make these changes.
 	{
 		std::scoped_lock loc(dataMutex);
-		workQueue.emplace_back(
-		    [pathsToDelete = std::move(pathsToDelete), pathsToAdd = std::move(pathsToAdd)]() {
-			    for(const auto& path : pathsToDelete) {
-				    // may have already been deleted if its a sub folder
-				    if(fs::exists(path)) { fs::remove_all(path); }
-			    }
-			    for(const auto& path : pathsToAdd) {
-				    // may have already been added if a sub folder was already added
-				    if(!fs::exists(path)) { fs::create_directories(path); }
-			    }
-		    });
+		workQueue.emplace_back([pathsToDelete = std::move(pathsToDelete)]() {
+			for(const auto& path : pathsToDelete) {
+				SetOperation("removing path {}", path.string());
+				// may have already been deleted if its a sub folder
+				if(fs::exists(path)) { fs::remove_all(path); }
+			}
+			FinishedJob();
+		});
+		workQueue.emplace_back([pathsToAdd = std::move(pathsToAdd)]() {
+			for(const auto& path : pathsToAdd) {
+				SetOperation("Adding path {}", path.string());
+				// may have already been added if a sub folder was already added
+				if(!fs::exists(path)) { fs::create_directories(path); }
+			}
+			FinishedJob();
+		});
+		workQueue.emplace_back([pathsToConvert = std::move(pathsToConvert)]() {
+			for(const auto& job : pathsToConvert) {
+				SetOperation("Converting from {} to {}", job.source.string(), job.dest.string());
+				ConvertFile(job);
+				FinishedJob();
+			}
+		});
 	}
 }
 
