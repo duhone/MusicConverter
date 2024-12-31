@@ -12,11 +12,15 @@
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
 
+#define DR_FLAC_IMPLEMENTATION
+#include <dr_flac.h>
+
 import CR.Engine;
 
 import std;
 
-namespace cep = CR::Engine::Platform;
+namespace cecore = CR::Engine::Core;
+namespace cep    = CR::Engine::Platform;
 
 namespace fs = std::filesystem;
 
@@ -47,7 +51,8 @@ std::mutex OperationMutex;
 std::mutex ErrorLogMutex;
 std::deque<std::string> ErrorLog;
 std::deque<std::move_only_function<void()>> workQueue;
-
+std::atomic_bool CancelWork;
+std::atomic_bool WorkCancelled;
 GLFWwindow* window{};
 
 std::jthread workerThread;
@@ -118,7 +123,54 @@ void SaveConfig() {
 	outputFile << outputString;
 }
 
-void ConvertFile([[maybe_unused]] const ConversionJob& job) {}
+void ConvertFile(const ConversionJob& job) {
+	if(CancelWork.load()) { return; }
+
+	if(!fs::exists(job.source)) {
+		AddError("{} doesn't exist, logic error in app", job.source.string());
+		return;
+	}
+
+	if(fs::exists(job.dest)) { fs::remove(job.dest); }
+
+	cep::MemoryMappedFile sourceFile(job.source);
+
+	struct FlacInfo {
+		uint32_t numFrames{};
+		uint32_t sampleRate{};
+		uint32_t numChannels{};
+	};
+	FlacInfo flacInfo{};
+
+	auto metaData = [](void* pUserData, drflac_metadata* pMetadata) {
+		if(pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_STREAMINFO) {
+			FlacInfo* info    = (FlacInfo*)pUserData;
+			info->numFrames   = (uint32_t)pMetadata->data.streaminfo.totalPCMFrameCount;
+			info->sampleRate  = pMetadata->data.streaminfo.sampleRate;
+			info->numChannels = pMetadata->data.streaminfo.channels;
+		}
+	};
+	auto drFlac = drflac_open_memory_with_metadata(sourceFile.data(), sourceFile.size(), metaData,
+	                                               &flacInfo, nullptr);
+	if(flacInfo.numFrames == 0) {
+		AddError("{} could not read flac uncompressed size", job.source.string());
+		return;
+	}
+
+	cecore::StorageBuffer<float> pcmData;
+	pcmData.prepare(flacInfo.numFrames * flacInfo.numChannels);
+
+	auto framesRead = drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames, pcmData.data());
+	while(framesRead < flacInfo.numFrames) {
+		framesRead += drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames - framesRead,
+		                                         pcmData.data() + framesRead * flacInfo.numChannels);
+	}
+	drflac_close(drFlac);
+
+	pcmData.commit(flacInfo.numFrames * flacInfo.numChannels);
+
+	if(CancelWork.load()) { return; }
+}
 
 void FinishedJob() {
 	++completedJobs;
@@ -127,6 +179,7 @@ void FinishedJob() {
 
 void StartConversion() {
 	ClearErrorLog();
+	CancelWork.store(false);
 	sourcePath = sourcePathString;
 	destPath   = destPathString;
 	if(!fs::exists(sourcePath)) {
@@ -209,13 +262,18 @@ void StartConversion() {
 }
 
 void CancelConversion() {
-	std::scoped_lock loc(dataMutex);
-	workQueue.clear();
+	CancelWork.store(true);
+	WorkCancelled.store(false);
 }
 
 void WorkerMain(std::stop_token stoken) {
 	std::move_only_function<void()> workItem;
 	while(!stoken.stop_requested()) {
+		if(CancelWork.load() == true) {
+			std::scoped_lock loc(dataMutex);
+			workQueue.clear();
+			WorkCancelled.store(true);
+		}
 		{
 			std::scoped_lock loc(dataMutex);
 			if(!workQueue.empty()) {
@@ -278,15 +336,24 @@ void DrawUI() {
 					CancelConversion();
 				} else {
 					std::scoped_lock loc(dataMutex);
-					if(workQueue.empty()) { appState = AppState::Idle; }
+					if(completedJobs == numJobs) {
+						numJobs         = 0;
+						completedJobs   = 0;
+						convertProgress = 0.0f;
+						appState        = AppState::Idle;
+					}
 				}
 			} else if(appState == AppState::Cancelling) {
 				ImGui::BeginDisabled();
 				ImGui::Button("Canceling", {0, 0});
 				ImGui::EndDisabled();
 
-				std::scoped_lock loc(dataMutex);
-				if(workQueue.empty()) { appState = AppState::Idle; }
+				if(WorkCancelled.load()) {
+					numJobs         = 0;
+					completedJobs   = 0;
+					convertProgress = 0.0f;
+					appState        = AppState::Idle;
+				}
 			}
 
 			ImGui::SeparatorEx(ImGuiSeparatorFlags_Horizontal);

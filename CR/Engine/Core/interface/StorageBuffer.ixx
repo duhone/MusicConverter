@@ -232,7 +232,7 @@ namespace CR::Engine::Core {
 		if(n > m_capacity) {
 			T* newData = m_allocator.allocate(n);
 			if constexpr(std::is_trivially_copyable_v<T>) {
-				memcpy(newData, m_data, m_size * sizeof(T));
+				std::memcpy(newData, m_data, m_size * sizeof(T));
 			} else if constexpr(std::is_move_assignable_v<T>) {
 				for(size_type i = 0; i < m_size; ++i) { newData[i] = std::move(m_data[i]); }
 			} else {
