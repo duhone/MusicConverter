@@ -253,8 +253,15 @@ void StartConversion() {
 		});
 		workQueue.emplace_back([pathsToConvert = std::move(pathsToConvert)]() {
 			for(const auto& job : pathsToConvert) {
-				SetOperation("Converting from {} to {}", job.source.string(), job.dest.string());
-				ConvertFile(job);
+				auto extension = job.source.extension().string();
+				for(char& c : extension) { c = (char)std::tolower(c); }
+				if(extension == ".mp3" || extension == ".ogg") {
+					SetOperation("Copying from {} to {}", job.source.string(), job.dest.string());
+					fs::copy_file(job.source, job.dest, fs::copy_options::overwrite_existing);
+				} else {
+					SetOperation("Converting from {} to {}", job.source.string(), job.dest.string());
+					ConvertFile(job);
+				}
 				FinishedJob();
 			}
 		});
