@@ -15,6 +15,8 @@
 #define DR_FLAC_IMPLEMENTATION
 #include <dr_flac.h>
 
+#include <samplerate.h>
+
 import CR.Engine;
 
 import std;
@@ -355,6 +357,34 @@ void ConvertFile(const ConversionJob& job) {
 			         flacInfo.numChannels);
 			return;
 			break;
+	}
+
+	if(CancelWork.load()) { return; }
+
+	constexpr uint32_t c_targetSampleRate = 48000;
+
+	uint64_t outputFrames = flacInfo.numFrames;
+	if(flacInfo.sampleRate != c_targetSampleRate) {
+		outputFrames = ((uint64_t)flacInfo.numFrames * c_targetSampleRate) / flacInfo.sampleRate;
+		nextBuffer();
+		currentBuffer().prepare(outputFrames * numOutputChannels);
+		auto srcPtr  = workingBuffer().data();
+		auto destPtr = currentBuffer().data();
+
+		SRC_DATA srcData;
+		srcData.end_of_input  = 0;
+		srcData.src_ratio     = static_cast<double>(c_targetSampleRate) / flacInfo.sampleRate;
+		srcData.data_in       = srcPtr;
+		srcData.input_frames  = flacInfo.numFrames;
+		srcData.data_out      = destPtr;
+		srcData.output_frames = (uint32_t)outputFrames;
+
+		int error = src_simple(&srcData, SRC_SINC_BEST_QUALITY, 2);
+		if(error != 0) {
+			AddError("error converted sample rate {}", src_strerror(error));
+			return;
+		}
+		currentBuffer().commit(outputFrames * numOutputChannels);
 	}
 
 	if(CancelWork.load()) { return; }
