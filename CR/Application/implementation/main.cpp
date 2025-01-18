@@ -157,17 +157,205 @@ void ConvertFile(const ConversionJob& job) {
 		return;
 	}
 
-	cecore::StorageBuffer<float> pcmData;
-	pcmData.prepare(flacInfo.numFrames * flacInfo.numChannels);
+	cecore::StorageBuffer<float> pcmData[2];
+	uint32_t currentBufferIndex = 0;
+	uint32_t workingBufferIndex = 1;
+	auto nextBuffer             = [&] { std::swap(currentBufferIndex, workingBufferIndex); };
 
-	auto framesRead = drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames, pcmData.data());
+	auto currentBuffer = [&]() -> auto& { return pcmData[currentBufferIndex]; };
+	auto workingBuffer = [&]() -> auto& { return pcmData[workingBufferIndex]; };
+
+	currentBuffer().prepare(flacInfo.numFrames * flacInfo.numChannels);
+
+	auto framesRead = drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames, currentBuffer().data());
 	while(framesRead < flacInfo.numFrames) {
-		framesRead += drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames - framesRead,
-		                                         pcmData.data() + framesRead * flacInfo.numChannels);
+		framesRead +=
+		    drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames - framesRead,
+		                               currentBuffer().data() + framesRead * flacInfo.numChannels);
 	}
 	drflac_close(drFlac);
 
-	pcmData.commit(flacInfo.numFrames * flacInfo.numChannels);
+	currentBuffer().commit(flacInfo.numFrames * flacInfo.numChannels);
+
+	if(CancelWork.load()) { return; }
+
+	// flac says by default channel layout is
+	// 1 channel - mono
+	// 2 channel - left, right
+	// 3 channel - left, right, center
+	// 4 channel - left, right, back left, back right
+	// 5 channel - left, right, center, back left, back right
+	// 6 channel - left, right, center, LFE, back left, back right
+	// 7 channel - left, right, center, LFE, back center, back left, back right
+	// 8 channel - left, right, center, LFE, back left, back right, side left, side right
+	// mostly just following suggestion in
+	// https://www.atsc.org/wp-content/uploads/2015/03/A52-201212-17.pdf to merge
+	// I don't have sdev and cdev, so just going to mix center at -3db and rears at -6db.
+
+	constexpr uint32_t numOutputChannels = 2;
+
+	// only going to output stereo, so need to merge/duplicate channels as appropriate.
+	switch(flacInfo.numChannels) {
+		case 1:
+			// mono, need to duplicate
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					destPtr[2 * frame + 0] = srcPtr[frame];
+					destPtr[2 * frame + 1] = srcPtr[frame];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		case 2:
+			// already stereo, nothing to do
+			break;
+		case 3:
+			// left, right, center
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					// mix center channel at -3db into left and right
+					constexpr float mainChannelMix   = 1.0f / 1.707f;
+					constexpr float centerChannelMix = 0.707f / 1.707f;
+					destPtr[2 * frame + 0] =
+					    mainChannelMix * srcPtr[3 * frame + 0] + centerChannelMix * srcPtr[3 * frame + 2];
+					destPtr[2 * frame + 1] =
+					    mainChannelMix * srcPtr[3 * frame + 1] + centerChannelMix * srcPtr[3 * frame + 2];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		case 4:
+			// left, right, back left, back right
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					// mix rear channels at -6db
+					constexpr float mainChannelMix = 1.0f / 1.5f;
+					constexpr float rearChannelMix = 0.5f / 1.5f;
+					destPtr[2 * frame + 0] =
+					    mainChannelMix * srcPtr[4 * frame + 0] + rearChannelMix * srcPtr[4 * frame + 2];
+					destPtr[2 * frame + 1] =
+					    mainChannelMix * srcPtr[4 * frame + 1] + rearChannelMix * srcPtr[4 * frame + 3];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		case 5:
+			// left, right, center, back left, back right
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					// mix center at -3db, rear channels at -6db
+					constexpr float channelMixTotal  = 1.0f + 0.707f + 0.5f;
+					constexpr float mainChannelMix   = 1.0f / channelMixTotal;
+					constexpr float centerChannelMix = 0.707f / channelMixTotal;
+					constexpr float rearChannelMix   = 0.5f / channelMixTotal;
+					destPtr[2 * frame + 0]           = mainChannelMix * srcPtr[5 * frame + 0] +
+					                         centerChannelMix * srcPtr[5 * frame + 2] +
+					                         rearChannelMix * srcPtr[5 * frame + 3];
+					destPtr[2 * frame + 1] = mainChannelMix * srcPtr[5 * frame + 1] +
+					                         centerChannelMix * srcPtr[5 * frame + 2] +
+					                         rearChannelMix * srcPtr[5 * frame + 4];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		case 6:
+			// left, right, center, LFE, back left, back right
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					// mix center at -3db, rear channels at -6db, LFE at identity
+					constexpr float channelMixTotal  = 1.0f + 0.707f + 0.5f + 1.0f;
+					constexpr float mainChannelMix   = 1.0f / channelMixTotal;
+					constexpr float centerChannelMix = 0.707f / channelMixTotal;
+					constexpr float lfeChannelMix    = 1.0f / channelMixTotal;
+					constexpr float rearChannelMix   = 0.5f / channelMixTotal;
+					destPtr[2 * frame + 0] =
+					    mainChannelMix * srcPtr[6 * frame + 0] + centerChannelMix * srcPtr[6 * frame + 2] +
+					    lfeChannelMix * srcPtr[6 * frame + 3] + rearChannelMix * srcPtr[6 * frame + 4];
+					destPtr[2 * frame + 1] =
+					    mainChannelMix * srcPtr[6 * frame + 1] + centerChannelMix * srcPtr[6 * frame + 2] +
+					    lfeChannelMix * srcPtr[6 * frame + 3] + rearChannelMix * srcPtr[6 * frame + 5];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		case 7:
+			// left, right, center, LFE, back center, back left, back right
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					// mix center at -3db, rear channels at -6db, LFE at identity
+					constexpr float channelMixTotal  = 1.0f + 0.707f + 0.5f + 1.0f + 0.5f;
+					constexpr float mainChannelMix   = 1.0f / channelMixTotal;
+					constexpr float centerChannelMix = 0.707f / channelMixTotal;
+					constexpr float lfeChannelMix    = 1.0f / channelMixTotal;
+					constexpr float rearChannelMix   = 0.5f / channelMixTotal;
+					destPtr[2 * frame + 0] =
+					    mainChannelMix * srcPtr[7 * frame + 0] + centerChannelMix * srcPtr[7 * frame + 2] +
+					    lfeChannelMix * srcPtr[7 * frame + 3] + rearChannelMix * srcPtr[7 * frame + 4] +
+					    rearChannelMix * srcPtr[7 * frame + 5];
+					destPtr[2 * frame + 1] =
+					    mainChannelMix * srcPtr[7 * frame + 1] + centerChannelMix * srcPtr[7 * frame + 2] +
+					    lfeChannelMix * srcPtr[7 * frame + 3] + rearChannelMix * srcPtr[7 * frame + 4] +
+					    rearChannelMix * srcPtr[7 * frame + 6];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		case 8:
+			// left, right, center, LFE, back left, back right, side left, side right
+			{
+				nextBuffer();
+				currentBuffer().prepare(flacInfo.numFrames * numOutputChannels);
+				auto srcPtr  = workingBuffer().data();
+				auto destPtr = currentBuffer().data();
+				for(uint32_t frame = 0; frame < flacInfo.numFrames; ++frame) {
+					// mix center at -3db, rear channels at -6db, LFE at identity
+					constexpr float channelMixTotal  = 1.0f + 0.707f + 0.5f + 1.0f + 0.5f;
+					constexpr float mainChannelMix   = 1.0f / channelMixTotal;
+					constexpr float centerChannelMix = 0.707f / channelMixTotal;
+					constexpr float lfeChannelMix    = 1.0f / channelMixTotal;
+					constexpr float rearChannelMix   = 0.5f / channelMixTotal;
+					destPtr[2 * frame + 0] =
+					    mainChannelMix * srcPtr[8 * frame + 0] + centerChannelMix * srcPtr[8 * frame + 2] +
+					    lfeChannelMix * srcPtr[8 * frame + 3] + rearChannelMix * srcPtr[8 * frame + 4] +
+					    rearChannelMix * srcPtr[8 * frame + 6];
+					destPtr[2 * frame + 1] =
+					    mainChannelMix * srcPtr[8 * frame + 1] + centerChannelMix * srcPtr[8 * frame + 2] +
+					    lfeChannelMix * srcPtr[8 * frame + 3] + rearChannelMix * srcPtr[8 * frame + 5] +
+					    rearChannelMix * srcPtr[8 * frame + 7];
+				}
+				currentBuffer().commit(flacInfo.numFrames * numOutputChannels);
+			}
+			break;
+		default:
+			AddError("{} had an usupported number of channels {}", job.source.string(),
+			         flacInfo.numChannels);
+			return;
+			break;
+	}
 
 	if(CancelWork.load()) { return; }
 }
