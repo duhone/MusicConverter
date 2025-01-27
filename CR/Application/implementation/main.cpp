@@ -17,6 +17,8 @@
 
 #include <samplerate.h>
 
+#include <opusenc.h>
+
 import CR.Engine;
 
 import std;
@@ -379,7 +381,12 @@ void ConvertFile(const ConversionJob& job) {
 		srcData.data_out      = destPtr;
 		srcData.output_frames = (uint32_t)outputFrames;
 
-		int error = src_simple(&srcData, SRC_SINC_BEST_QUALITY, 2);
+		uint32_t filterQuality = SRC_SINC_BEST_QUALITY;
+#ifdef CR_DEBUG
+		filterQuality = SRC_LINEAR;
+#endif
+
+		int error = src_simple(&srcData, filterQuality, 2);
 		if(error != 0) {
 			AddError("error converted sample rate {}", src_strerror(error));
 			return;

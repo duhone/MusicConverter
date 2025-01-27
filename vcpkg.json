@@ -1,20 +1,26 @@
 {
   "dependencies": [
+    "drlibs",
     "fmt",
+    {
+      "name": "glad",
+      "features": [
+        "extensions",
+        "gl-api-46"
+      ]
+    },
     "glfw3",
     "glm",
-    "libsamplerate",
-    "mp3lame",
-    "simdjson",
-    "spdlog",
-    "drlibs",
     {
-        "name": "glad",
-        "features": [ "extensions", "gl-api-46" ]
+      "name": "imgui",
+      "features": [
+        "glfw-binding",
+        "opengl3-binding"
+      ]
     },
-    {
-        "name": "imgui",
-        "features": [ "glfw-binding", "opengl3-binding" ]
-    }
+    "libsamplerate",
+    "opus",
+    "simdjson",
+    "spdlog"
   ]
 }

@@ -20,7 +20,8 @@ add_executable(MusicConverter)
 settingsCR(MusicConverter)
 
 target_link_libraries(MusicConverter PRIVATE 
-	mp3lame::mp3lame
+  Opus::opus
+  libopusenc
   fmt::fmt
   simdjson::simdjson
   glfw
