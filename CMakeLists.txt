@@ -12,7 +12,7 @@ set(CMAKE_EXPERIMENTAL_IMPORT_STD
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-project(MusicConverter LANGUAGES CXX)
+project(MusicConverter LANGUAGES CXX C)
 
 include (${root}/common.cmake)
 include (${root}/3rdParty/build/build.cmake)

@@ -143,15 +143,31 @@ void ConvertFile(const ConversionJob& job) {
 		uint32_t numFrames{};
 		uint32_t sampleRate{};
 		uint32_t numChannels{};
+
+		std::vector<std::string> comments;
 	};
 	FlacInfo flacInfo{};
 
 	auto metaData = [](void* pUserData, drflac_metadata* pMetadata) {
+		FlacInfo* info = (FlacInfo*)pUserData;
 		if(pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_STREAMINFO) {
-			FlacInfo* info    = (FlacInfo*)pUserData;
 			info->numFrames   = (uint32_t)pMetadata->data.streaminfo.totalPCMFrameCount;
 			info->sampleRate  = pMetadata->data.streaminfo.sampleRate;
 			info->numChannels = pMetadata->data.streaminfo.channels;
+		}
+		if(pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT) {
+			drflac_vorbis_comment_iterator commentIterator;
+			drflac_init_vorbis_comment_iterator(&commentIterator,
+			                                    pMetadata->data.vorbis_comment.commentCount,
+			                                    pMetadata->data.vorbis_comment.pComments);
+			uint32_t commentCount = pMetadata->data.vorbis_comment.commentCount;
+			info->comments.reserve(commentCount);
+			uint32_t commentLength{};
+			const char* comment = drflac_next_vorbis_comment(&commentIterator, &commentLength);
+			while(comment != nullptr) {
+				info->comments.emplace_back(comment, commentLength);
+				comment = drflac_next_vorbis_comment(&commentIterator, &commentLength);
+			}
 		}
 	};
 	auto drFlac = drflac_open_memory_with_metadata(sourceFile.data(), sourceFile.size(), metaData,
@@ -395,6 +411,14 @@ void ConvertFile(const ConversionJob& job) {
 	}
 
 	if(CancelWork.load()) { return; }
+
+	OggOpusComments* opusComments = ope_comments_create();
+
+	for(const auto& comment : flacInfo.comments) {
+		ope_comments_add_string(opusComments, comment.c_str());
+	}
+
+	ope_comments_destroy(opusComments);
 }
 
 void FinishedJob() {

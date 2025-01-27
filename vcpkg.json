@@ -21,6 +21,7 @@
     "libsamplerate",
     "opus",
     "simdjson",
-    "spdlog"
+    "spdlog",
+    "speexdsp"
   ]
 }

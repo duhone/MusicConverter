@@ -23,11 +23,21 @@ set(CR_BUILD_FILES
 )
 
 add_library(libopusenc OBJECT)
-set_target_properties(libopusenc PROPERTIES LINKER_LANGUAGE C)
 
 settings3rdParty(libopusenc)
 
+target_compile_definitions(libopusenc PRIVATE
+    RANDOM_PREFIX=libopusenc
+    OUTSIDE_SPEEX
+    FLOATING_POINT
+    PACKAGE_VERSION="0.2.1"
+    PACKAGE_NAME="libopusenc"
+    OPE_BUILD)
+
 target_include_directories(libopusenc SYSTEM PRIVATE "${root}/libopusenc/src")
 target_include_directories(libopusenc SYSTEM PUBLIC "${root}/libopusenc/include")
+target_link_libraries(libopusenc PUBLIC 
+  Opus::opus
+)
 
 endblock()

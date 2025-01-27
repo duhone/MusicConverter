@@ -73,6 +73,11 @@ function(settings3rdParty target)
 	target_sources(${target} PUBLIC FILE_SET HEADERS FILES ${CR_INTERFACE_HEADERS})
 	target_sources(${target} PUBLIC FILE_SET CXX_MODULES FILES ${CR_INTERFACE_MODULES})
 
+	source_group(TREE ${root} FILES ${CR_INTERFACE_HEADERS})
+	source_group(TREE ${root} FILES ${CR_INTERFACE_MODULES})
+	source_group(TREE ${root} FILES ${CR_IMPLEMENTATION})
+	source_group(TREE ${root} FILES ${CR_BUILD_FILES})
+
 	target_compile_options(${target} PRIVATE /W0)
 	target_compile_options(${target} PRIVATE /WX-)
 	
