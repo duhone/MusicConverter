@@ -418,6 +418,30 @@ void ConvertFile(const ConversionJob& job) {
 		ope_comments_add_string(opusComments, comment.c_str());
 	}
 
+	int32_t error{};
+	OggOpusEnc* encoder = ope_encoder_create_file(job.dest.string().c_str(), opusComments,
+	                                              c_targetSampleRate, 2, 0, &error);
+	if(encoder == nullptr) {
+		AddError("Failed to created opus encoder. {}", ope_strerror(error));
+		ope_comments_destroy(opusComments);
+		return;
+	}
+
+#ifdef CR_DEBUG
+	ope_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
+#else
+	ope_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(10));
+#endif
+	ope_encoder_ctl(encoder, OPUS_SET_BITRATE(256 * 1024));
+
+	error = ope_encoder_write_float(encoder, currentBuffer().data(), (uint32_t)outputFrames);
+	if(error != OPE_OK) {
+		AddError("Failed to write data to opus encoder. {}", ope_strerror(error));
+		// done anyway, just fall through and clean up.
+	}
+
+	ope_encoder_drain(encoder);
+	ope_encoder_destroy(encoder);
 	ope_comments_destroy(opusComments);
 }
 
@@ -464,8 +488,9 @@ void StartConversion() {
 	std::vector<ConversionJob> pathsToConvert;
 	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
 		if(!entry.is_directory()) {
-			auto relPath         = fs::relative(entry.path(), sourcePath);
-			auto pathToCheck     = destPath / relPath;
+			auto relPath     = fs::relative(entry.path(), sourcePath);
+			auto pathToCheck = destPath / relPath;
+			pathToCheck.replace_extension(".opus");
 			bool needsConversion = false;
 			if(!fs::exists(pathToCheck)) {
 				needsConversion = true;
