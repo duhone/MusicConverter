@@ -127,6 +127,16 @@ void SaveConfig() {
 	outputFile << outputString;
 }
 
+bool isPathToCopy(const fs::path& path) {
+	std::error_code ec;
+	if(!fs::is_regular_file(path, ec)) { return false; }
+	auto extension = path.extension().string();
+	for(char& c : extension) { c = (char)std::tolower(c); }
+
+	if((extension == ".mp3") || (extension == ".ogg") || (extension == ".jpg")) { return true; }
+	return false;
+}
+
 void ConvertFile(const ConversionJob& job) {
 	if(CancelWork.load()) { return; }
 
@@ -398,7 +408,7 @@ void ConvertFile(const ConversionJob& job) {
 		srcData.output_frames = (uint32_t)outputFrames;
 
 		uint32_t filterQuality = SRC_SINC_BEST_QUALITY;
-#ifdef CR_DEBUG
+#if CR_DEBUG
 		filterQuality = SRC_LINEAR;
 #endif
 
@@ -427,7 +437,7 @@ void ConvertFile(const ConversionJob& job) {
 		return;
 	}
 
-#ifdef CR_DEBUG
+#if CR_DEBUG
 	ope_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
 #else
 	ope_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(10));
@@ -464,13 +474,25 @@ void StartConversion() {
 		return;
 	}
 
-	// First lets delete any directories in dest that aren't in source
+	// First lets delete any directories/files in dest that aren't in source
 	std::vector<fs::path> pathsToDelete;
+	std::vector<fs::path> filesToDelete;
 	for(const auto& entry : fs::recursive_directory_iterator(destPath)) {
 		if(entry.is_directory()) {
 			auto relPath     = fs::relative(entry.path(), destPath);
 			auto pathToCheck = sourcePath / relPath;
 			if(!fs::exists(pathToCheck)) { pathsToDelete.push_back(entry.path()); }
+		} else if(entry.is_regular_file()) {
+			auto relPath     = fs::relative(entry.path(), destPath);
+			auto pathToCheck = sourcePath / relPath;
+			if(isPathToCopy(entry.path())) {
+				if(!fs::exists(pathToCheck)) { filesToDelete.push_back(entry.path()); }
+			} else if(entry.path().extension() == ".opus") {
+				pathToCheck.replace_extension(".flac");
+				if(!fs::exists(pathToCheck)) { filesToDelete.push_back(entry.path()); }
+			} else {
+				filesToDelete.push_back(entry.path());
+			}
 		}
 	}
 
@@ -481,6 +503,15 @@ void StartConversion() {
 			auto relPath     = fs::relative(entry.path(), sourcePath);
 			auto pathToCheck = destPath / relPath;
 			if(!fs::exists(pathToCheck)) { pathsToAdd.push_back(pathToCheck); }
+		}
+	}
+
+	std::vector<ConversionJob> pathsToCopy;
+	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
+		if(!entry.is_directory() && isPathToCopy(entry.path())) {
+			auto relPath     = fs::relative(entry.path(), sourcePath);
+			auto pathToCheck = destPath / relPath;
+			if(!fs::exists(pathToCheck)) { pathsToCopy.emplace_back(entry.path(), pathToCheck); }
 		}
 	}
 
@@ -502,13 +533,20 @@ void StartConversion() {
 	}
 
 	// adding and removing folders are 1 job each.
-	numJobs         = (int32_t)pathsToConvert.size() + 2;
+	numJobs         = (int32_t)pathsToConvert.size() + (int32_t)pathsToCopy.size() + 2;
 	completedJobs   = 0;
 	convertProgress = 0.0f;
 
 	// and push a work item to make these changes.
 	{
 		std::scoped_lock loc(dataMutex);
+		workQueue.emplace_back([filesToDelete = std::move(filesToDelete)]() {
+			for(const auto& path : filesToDelete) {
+				SetOperation("removing path {}", path.string());
+				if(fs::exists(path)) { fs::remove(path); }
+			}
+			FinishedJob();
+		});
 		workQueue.emplace_back([pathsToDelete = std::move(pathsToDelete)]() {
 			for(const auto& path : pathsToDelete) {
 				SetOperation("removing path {}", path.string());
@@ -525,17 +563,17 @@ void StartConversion() {
 			}
 			FinishedJob();
 		});
+		workQueue.emplace_back([pathsToCopy = std::move(pathsToCopy)]() {
+			for(const auto& job : pathsToCopy) {
+				SetOperation("Copying from {} to {}", job.source.string(), job.dest.string());
+				fs::copy_file(job.source, job.dest, fs::copy_options::overwrite_existing);
+				FinishedJob();
+			}
+		});
 		workQueue.emplace_back([pathsToConvert = std::move(pathsToConvert)]() {
 			for(const auto& job : pathsToConvert) {
-				auto extension = job.source.extension().string();
-				for(char& c : extension) { c = (char)std::tolower(c); }
-				if(extension == ".mp3" || extension == ".ogg") {
-					SetOperation("Copying from {} to {}", job.source.string(), job.dest.string());
-					fs::copy_file(job.source, job.dest, fs::copy_options::overwrite_existing);
-				} else {
-					SetOperation("Converting from {} to {}", job.source.string(), job.dest.string());
-					ConvertFile(job);
-				}
+				SetOperation("Converting from {} to {}", job.source.string(), job.dest.string());
+				ConvertFile(job);
 				FinishedJob();
 			}
 		});
