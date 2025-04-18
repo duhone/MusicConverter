@@ -133,7 +133,10 @@ bool isPathToCopy(const fs::path& path) {
 	auto extension = path.extension().string();
 	for(char& c : extension) { c = (char)std::tolower(c); }
 
-	if((extension == ".mp3") || (extension == ".ogg") || (extension == ".jpg")) { return true; }
+	if((extension == ".mp3") || (extension == ".ogg") || (extension == ".jpg") ||
+	   (extension == ".opus")) {
+		return true;
+	}
 	return false;
 }
 
@@ -485,10 +488,14 @@ void StartConversion() {
 		} else if(entry.is_regular_file()) {
 			auto relPath     = fs::relative(entry.path(), destPath);
 			auto pathToCheck = sourcePath / relPath;
-			if(isPathToCopy(entry.path())) {
-				if(!fs::exists(pathToCheck)) { filesToDelete.push_back(entry.path()); }
-			} else if(entry.path().extension() == ".opus") {
-				pathToCheck.replace_extension(".flac");
+			if(entry.path().extension() == ".ogg") {
+				// If it was copied or converted keep it
+				auto pathToCheck2 = pathToCheck;
+				pathToCheck2.replace_extension(".flac");
+				if(!fs::exists(pathToCheck) && !fs::exists(pathToCheck2)) {
+					filesToDelete.push_back(entry.path());
+				}
+			} else if(isPathToCopy(entry.path())) {
 				if(!fs::exists(pathToCheck)) { filesToDelete.push_back(entry.path()); }
 			} else {
 				filesToDelete.push_back(entry.path());
@@ -518,10 +525,10 @@ void StartConversion() {
 	// now need to add conversion work. this work must happen after the folder structure is correct
 	std::vector<ConversionJob> pathsToConvert;
 	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
-		if(!entry.is_directory()) {
+		if(!entry.is_directory() && entry.path().extension() == ".flac") {
 			auto relPath     = fs::relative(entry.path(), sourcePath);
 			auto pathToCheck = destPath / relPath;
-			pathToCheck.replace_extension(".opus");
+			pathToCheck.replace_extension(".ogg");
 			bool needsConversion = false;
 			if(!fs::exists(pathToCheck)) {
 				needsConversion = true;
