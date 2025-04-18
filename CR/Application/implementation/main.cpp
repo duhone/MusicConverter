@@ -616,6 +616,30 @@ void WorkerMain(std::stop_token stoken) {
 	}
 }
 
+void CleanUpPathNames() {
+	std::vector<fs::path> pathsToAdd;
+	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
+		if(entry.is_directory() || entry.is_regular_file()) {
+			auto fixedPathString = entry.path().u16string();
+			bool hadToFix        = false;
+			std::erase_if(fixedPathString, [&](char16_t input) {
+				if(input < 32 || input > 126) {
+					hadToFix = true;
+					return true;
+				} else {
+					return false;
+				}
+			});
+			fs::path fixedPath = fixedPathString;
+			// fs::equivalent crashes on windows with unicode
+			if(hadToFix) {
+				SetOperation("rename {}", fixedPath.string().c_str());
+				fs::rename(entry.path(), fixedPath);
+			}
+		}
+	}
+}
+
 void DrawUI() {
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
 	glfwSetWindowTitle(window, "Music Converter");
@@ -653,6 +677,10 @@ void DrawUI() {
 					appState = AppState::Converting;
 					SetOperation("Starting Conversion");
 					StartConversion();
+				}
+				if(ImGui::Button("Clean up source path names", {0, 0})) {
+					SetOperation("Clean up source path names");
+					CleanUpPathNames();
 				}
 
 			} else if(appState == AppState::Converting) {
