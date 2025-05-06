@@ -1,4 +1,6 @@
 #include <fmt/format.h>
+#include <fmt/std.h>
+#include <fmt/xchar.h>
 #include <simdjson.h>
 
 #define GLAD_GL_IMPLEMENTATION
@@ -201,11 +203,10 @@ void ConvertFile(const ConversionJob& job) {
 	currentBuffer().prepare(flacInfo.numFrames * flacInfo.numChannels);
 
 	auto framesRead = drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames, currentBuffer().data());
-	while(framesRead < flacInfo.numFrames) {
-		framesRead +=
-		    drflac_read_pcm_frames_f32(drFlac, flacInfo.numFrames - framesRead,
-		                               currentBuffer().data() + framesRead * flacInfo.numChannels);
+	if(framesRead != flacInfo.numFrames) {
+		AddError("{} was shorter than expected, corrupted data?", job.source.string());
 	}
+	flacInfo.numFrames = (uint32_t)framesRead;
 	drflac_close(drFlac);
 
 	currentBuffer().commit(flacInfo.numFrames * flacInfo.numChannels);
@@ -540,7 +541,7 @@ void StartConversion() {
 	}
 
 	// adding and removing folders are 1 job each.
-	numJobs         = (int32_t)pathsToConvert.size() + (int32_t)pathsToCopy.size() + 2;
+	numJobs         = (int32_t)pathsToConvert.size() + (int32_t)pathsToCopy.size() + 3;
 	completedJobs   = 0;
 	convertProgress = 0.0f;
 
@@ -616,9 +617,14 @@ void WorkerMain(std::stop_token stoken) {
 	}
 }
 
-void CleanUpPathNames() {
-	std::vector<fs::path> pathsToAdd;
-	for(const auto& entry : fs::recursive_directory_iterator(sourcePath)) {
+void CleanUpPathNames(const fs::path& pathToClean) {
+	struct RenameOp {
+		fs::path from;
+		fs::path to;
+	};
+	std::vector<RenameOp> filesToRename;
+	std::vector<RenameOp> foldersToRename;
+	for(const auto& entry : fs::recursive_directory_iterator(pathToClean)) {
 		if(entry.is_directory() || entry.is_regular_file()) {
 			auto fixedPathString = entry.path().u16string();
 			bool hadToFix        = false;
@@ -633,10 +639,25 @@ void CleanUpPathNames() {
 			fs::path fixedPath = fixedPathString;
 			// fs::equivalent crashes on windows with unicode
 			if(hadToFix) {
-				SetOperation("rename {}", fixedPath.string().c_str());
-				fs::rename(entry.path(), fixedPath);
+				if(entry.is_directory()) {
+					foldersToRename.emplace_back(entry.path(), fixedPath);
+				} else {
+					filesToRename.emplace_back(entry.path(), fixedPath);
+				}
 			}
 		}
+	}
+	for(const auto& op : filesToRename) {
+		SetOperation("rename {}", op.to.string().c_str());
+		std::error_code ec;
+		fs::rename(op.from, op.to, ec);
+		if(ec) { AddError("Failed to rename file. error {}", ec.message()); }
+	}
+	for(const auto& op : foldersToRename) {
+		SetOperation("rename {}", op.to.string().c_str());
+		std::error_code ec;
+		fs::rename(op.from, op.to, ec);
+		if(ec) { AddError("Failed to rename file. error {}", ec.message()); }
 	}
 }
 
@@ -680,7 +701,8 @@ void DrawUI() {
 				}
 				if(ImGui::Button("Clean up source path names", {0, 0})) {
 					SetOperation("Clean up source path names");
-					CleanUpPathNames();
+					CleanUpPathNames(sourcePath);
+					CleanUpPathNames(destPath);
 				}
 
 			} else if(appState == AppState::Converting) {
@@ -709,6 +731,11 @@ void DrawUI() {
 					appState        = AppState::Idle;
 				}
 			}
+
+			ImGui::SameLine();
+
+			std::string progressText = fmt::format("Job: {}/{}", completedJobs, numJobs);
+			ImGui::InputText("##progress_text", &progressText, ImGuiInputTextFlags_ReadOnly);
 
 			ImGui::SeparatorEx(ImGuiSeparatorFlags_Horizontal);
 
