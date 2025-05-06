@@ -21,6 +21,8 @@
 
 #include <opusenc.h>
 
+#include <CR/Engine/Platform/interface/platform/windows/CRWindows.h>
+
 import CR.Engine;
 
 import std;
@@ -580,6 +582,8 @@ void StartConversion() {
 		});
 		workQueue.emplace_back([pathsToConvert = std::move(pathsToConvert)]() {
 			for(const auto& job : pathsToConvert) {
+				// keep computer from going to sleep.
+				SetThreadExecutionState(ES_SYSTEM_REQUIRED);
 				SetOperation("Converting from {} to {}", job.source.string(), job.dest.string());
 				ConvertFile(job);
 				FinishedJob();
